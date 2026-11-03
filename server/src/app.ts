@@ -27,6 +27,7 @@ import { backupsRouter } from './routes/backups.js';
 import { cacheRouter } from './routes/cache.js';
 import { compressionRouter } from './routes/compression.js';
 import { authRouter } from './routes/auth.js';
+import { ssoRouter } from './routes/sso.js';
 import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { statusRouter, providersRouter } from './routes/status.js';
@@ -239,6 +240,16 @@ export function createApp(config?: Config) {
   // the Ollama /api/* mount above, which carries its own proxy limiter.
   const adminRateLimiter = createAdminRateLimiter();
   app.use('/api', adminRateLimiter);
+
+  // Single sign-on from llm-gateway-go. Mounted OUTSIDE the dashboard session
+  // gate on purpose: the identity token in the request IS the credential, so
+  // demanding a session to obtain a session would be circular. Two shapes:
+  //   GET  /sso?token=…            browser landing (sets the session cookie)
+  //   POST /api/auth/sso/exchange  programmatic exchange (returns the token)
+  // Mounted BEFORE /api/auth so the exchange never depends on the auth
+  // router falling through for an unknown path.
+  app.use('/api/auth/sso', ssoRouter);
+  app.use('/sso', ssoRouter);
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
   // session; everything else under /api/* requires a logged-in dashboard user.

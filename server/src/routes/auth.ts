@@ -16,6 +16,7 @@ import {
   desktopSessionToken,
 } from '../services/auth.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
+import { clearSessionCookie, isSecureRequest, resolveSessionToken } from '../lib/session-cookie.js';
 import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
 
 export const authRouter = Router();
@@ -188,7 +189,7 @@ export function desktopSignInAllowed(req: Request): boolean {
 // `desktop` tells the dashboard it can fetch a session instead of showing the
 // sign-in form.
 authRouter.get('/status', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(resolveSessionToken(req));
   res.json({
     needsSetup: userCount() === 0,
     authenticated: !!session,
@@ -271,12 +272,15 @@ authRouter.post('/login', (req: Request, res: Response) => {
 });
 
 authRouter.post('/logout', (req: Request, res: Response) => {
-  deleteSession(bearer(req));
+  deleteSession(resolveSessionToken(req));
+  // The single sign-on cookie carries the same session, so it has to go too —
+  // otherwise the browser keeps replaying a token the server just revoked.
+  clearSessionCookie(res, isSecureRequest(req));
   res.json({ success: true });
 });
 
 authRouter.get('/me', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(resolveSessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
@@ -291,7 +295,7 @@ const changeEmailSchema = z.object({
 });
 
 authRouter.post('/change-email', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(resolveSessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
@@ -333,7 +337,7 @@ const changePasswordSchema = z.object({
 });
 
 authRouter.post('/change-password', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(resolveSessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
