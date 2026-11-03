@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { exchangeSsoToken } from '../services/sso.js';
+import { fetchGatewayTicket } from '../services/sso-gateway.js';
 import { SESSION_TTL_MS } from '../services/auth.js';
 import { isSecureRequest, setSessionCookie } from '../lib/session-cookie.js';
 
@@ -51,13 +52,30 @@ function errorBody(code: string, message: string): { error: { message: string; t
   return { error: { message, type: 'authentication_error', code } };
 }
 
-ssoRouter.get('/', (req: Request, res: Response) => {
+ssoRouter.get('/', async (req: Request, res: Response) => {
   const token = readTokenFromQuery(req);
+
   if (!token) {
-    res.status(400).json(errorBody('missing_token', 'No identity token supplied'));
+    // No ticket in the URL: ask the gateway for one on the visitor's behalf.
+    // The gateway is the identity source, so it is the only party that can
+    // say "this browser is signed in as X".
+    const ticket = await fetchGatewayTicket(req);
+    if (!ticket.ok) {
+      res.status(ticket.status).json(errorBody(ticket.code, ticket.message));
+      return;
+    }
+    completeSsoLogin(req, res, ticket.token);
     return;
   }
 
+  completeSsoLogin(req, res, token);
+});
+
+/**
+ * Verify a ticket and finish the landing: a dashboard session, the cookie
+ * that carries it, and a redirect that drops the credential from the URL.
+ */
+function completeSsoLogin(req: Request, res: Response, token: string): void {
   const result = exchangeSsoToken(token);
   if (!result.ok) {
     res.status(result.status).json(errorBody(result.code, result.message));
@@ -73,7 +91,7 @@ ssoRouter.get('/', (req: Request, res: Response) => {
   // would end up in history, in the Referer of the next navigation, and in
   // any proxy log between here and the app).
   res.redirect(302, safeNext(req.query.next));
-});
+}
 
 ssoRouter.post('/exchange', (req: Request, res: Response) => {
   const token = readTokenFromBody(req);

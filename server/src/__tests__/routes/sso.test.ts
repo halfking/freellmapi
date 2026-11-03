@@ -119,9 +119,13 @@ describe('single sign-on landing', () => {
     expect(res.status).toBe(503);
   });
 
-  it('requires a token', async () => {
+  // Without a ticket in the URL, /sso asks the gateway for one (the gateway
+  // owns the identity). This suite has no gateway configured, so the answer
+  // is "not enrolled" rather than "bad request".
+  it('asks the gateway when no ticket is supplied', async () => {
     const res = await call(app, '/sso');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(503);
+    expect(res.body).toContain('gateway_not_configured');
   });
 
   it('opens the admin surface with nothing but the cookie', async () => {

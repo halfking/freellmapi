@@ -18,15 +18,26 @@ The two services share the **cross-project identity contract** that
 llm-gateway-go already uses with RedClaw, openpocket, memora and acc (the
 contract is specified in `llm-gateway-go/pkg/identity/README.md`):
 
-1. The gateway mints a **short-lived JWT** for the signed-in user:
+1. The browser arrives at the dashboard. It carries a gateway session cookie
+   (the gateway sets it on `Domain=.itestu.cn`, so it reaches this host) but
+   no dashboard session yet.
+2. This service notices the situation and redirects the navigation to
+   `GET /sso` (the redirect only fires for HTML navigations — an XHR asking
+   for JSON is never redirected).
+3. `/sso` asks the gateway for a ticket: it calls the gateway's
+   `GET /api/auth/app-token?app=freellmapi`, **forwarding only the gateway's
+   own cookie** — this service's session token never leaves.
+4. The gateway mints a **short-lived JWT** for the signed-in user:
    `iss=llm-gateway`, `aud=freellmapi-api`, signed with the shared secret
    (`IDENTITY_SHARED_SECRET`), valid for five minutes.
-2. The browser is sent to `GET /sso?token=…` on this service.
-3. FreeLLMAPI verifies the token (signature, issuer allowlist, audience,
+5. FreeLLMAPI verifies the ticket (signature, issuer allowlist, audience,
    expiry), maps the identity onto a local account, mints a dashboard session
    and sets the `flm_session` cookie.
-4. The dashboard renders. Every later request carries the cookie, so the
+6. The dashboard renders. Every later request carries the cookie, so the
    login form never appears.
+
+A ticket can also be supplied directly (`GET /sso?token=…`) — that is the
+shape a reverse proxy or a hand-written link uses.
 
 The ticket is scoped three ways, on purpose:
 
@@ -47,11 +58,19 @@ session.
 IDENTITY_SHARED_SECRET=<the same 32+ byte value the gateway uses>
 IDENTITY_ISSUER_ALLOWLIST=redclaw,memora,llm-gateway,pocket,acc   # optional
 FREELLMAPI_SSO_AUDIENCE=freellmapi-api                            # optional
+FREELLMAPI_GATEWAY_URL=https://llm.example.com                    # optional
+FREELLMAPI_GATEWAY_COOKIE=llmgw_session                           # optional
+FREELLMAPI_GATEWAY_APP=freellmapi                                 # optional
 ```
 
-All three are opt-in. **With `IDENTITY_SHARED_SECRET` unset (or shorter than
-32 bytes) single sign-on is off** and every token is refused — there is no
-fallback secret.
+`FREELLMAPI_GATEWAY_URL` is where the ticket is requested from — point it at
+the gateway's reachable base URL (the mesh entry, or the container address
+inside the same Docker network). Without it the landing route cannot ask for
+a ticket, and only the explicit `?token=` shape works.
+
+All of them are opt-in. **With `IDENTITY_SHARED_SECRET` unset (or shorter
+than 32 bytes) single sign-on is off** and every token is refused — there is
+no fallback secret.
 
 On the gateway side:
 
@@ -62,11 +81,11 @@ FREELLMAPI_PUBLIC_URL=https://freellm.example.com   # optional, adds a ready URL
 
 ## The endpoints
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /sso?token=…` | Browser landing. Verifies the ticket, sets the `flm_session` cookie, redirects to `/`. |
-| `POST /api/auth/sso/exchange` | Programmatic exchange. Body `{"token":"…"}`, returns the dashboard session token. |
-| `GET /api/auth/app-token?app=freellmapi` | **On the gateway.** Mints the ticket for the signed-in user. |
+| Endpoint | Where | Purpose |
+| --- | --- | --- |
+| `GET /sso` | here | Browser landing. Asks the gateway for a ticket (or takes `?token=…`), verifies it, sets the `flm_session` cookie, redirects to `/`. |
+| `POST /api/auth/sso/exchange` | here | Programmatic exchange. Body `{"token":"…"}`, returns the dashboard session token. |
+| `GET /api/auth/app-token?app=freellmapi` | **on the gateway** | Mints the ticket for the signed-in user. |
 
 The gateway endpoint also returns the ticket in an `X-LLMGW-App-Token`
 response header, so a reverse proxy can capture it in an `auth_request`

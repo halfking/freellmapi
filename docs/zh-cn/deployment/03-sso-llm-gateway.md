@@ -16,13 +16,21 @@ FreeLLMAPI 可以挂在 llm-gateway-go 后面，构成这条请求链路：
 两侧共用 llm-gateway-go 已经在与 RedClaw、openpocket、memora、acc 之间使用的
 **跨项目身份契约**（契约定义见 `llm-gateway-go/pkg/identity/README.md`）：
 
-1. 网关为已登录用户签发一枚**短时 JWT**：`iss=llm-gateway`、
+1. 浏览器打开仪表盘。它带着网关的会话 Cookie（网关把它设在
+   `Domain=.itestu.cn`，因此能到达本机域名），但还没有本服务的仪表盘会话。
+2. 本服务识别出这一状态，把这次**页面导航**重定向到 `GET /sso`
+   （只对 HTML 导航生效 —— 拉 JSON 的 XHR 绝不会被重定向）。
+3. `/sso` 向网关要一张票：调用网关的
+   `GET /api/auth/app-token?app=freellmapi`，**只转发网关自己的 Cookie**，
+   本服务的会话令牌不会外流。
+4. 网关为已登录用户签发一枚**短时 JWT**：`iss=llm-gateway`、
    `aud=freellmapi-api`，用共享密钥（`IDENTITY_SHARED_SECRET`）签名，有效期
    5 分钟。
-2. 浏览器被引导到本服务的 `GET /sso?token=…`。
-3. FreeLLMAPI 校验该令牌（签名、签发方白名单、受众、有效期），把身份映射到
+5. FreeLLMAPI 校验该票据（签名、签发方白名单、受众、有效期），把身份映射到
    本地账号，签发仪表盘会话，并下发 `flm_session` Cookie。
-4. 仪表盘直接渲染。此后每次请求都带上该 Cookie，登录表单不会再出现。
+6. 仪表盘直接渲染。此后每次请求都带上该 Cookie，登录表单不会再出现。
+
+票据也可以直接给出（`GET /sso?token=…`）—— 那是反向代理或手工链接使用的形态。
 
 这张票据在三处做了限定，都是有意为之：
 
@@ -42,9 +50,16 @@ FreeLLMAPI 可以挂在 llm-gateway-go 后面，构成这条请求链路：
 IDENTITY_SHARED_SECRET=<与网关完全相同的 32 字节以上值>
 IDENTITY_ISSUER_ALLOWLIST=redclaw,memora,llm-gateway,pocket,acc   # 可选
 FREELLMAPI_SSO_AUDIENCE=freellmapi-api                            # 可选
+FREELLMAPI_GATEWAY_URL=https://llm.example.com                    # 可选
+FREELLMAPI_GATEWAY_COOKIE=llmgw_session                           # 可选
+FREELLMAPI_GATEWAY_APP=freellmapi                                 # 可选
 ```
 
-三个变量都是可选的。**若 `IDENTITY_SHARED_SECRET` 未设置（或短于 32 字节），
+`FREELLMAPI_GATEWAY_URL` 是**向谁要票** —— 填网关可达的基址（网状入口，或同一
+Docker 网络内的容器地址）。不填它，落地页就拿不到票，只有显式 `?token=` 那条路
+可用。
+
+这些变量都是可选的。**若 `IDENTITY_SHARED_SECRET` 未设置（或短于 32 字节），
 单点登录即为关闭状态，任何令牌都会被拒绝** —— 不存在兜底密钥。
 
 网关侧：
@@ -56,11 +71,11 @@ FREELLMAPI_PUBLIC_URL=https://freellm.example.com   # 可选，用于直接给�
 
 ## 接口
 
-| 接口 | 用途 |
-| --- | --- |
-| `GET /sso?token=…` | 浏览器落地页：校验票据、下发 `flm_session` Cookie、跳转到 `/`。 |
-| `POST /api/auth/sso/exchange` | 程序化交换：请求体 `{"token":"…"}`，返回仪表盘会话令牌。 |
-| `GET /api/auth/app-token?app=freellmapi` | **在网关上**：为已登录用户签发票据。 |
+| 接口 | 在哪 | 用途 |
+| --- | --- | --- |
+| `GET /sso` | 本服务 | 浏览器落地页：向网关要票（或直接收 `?token=…`），校验后下发 `flm_session` Cookie 并跳转到 `/`。 |
+| `POST /api/auth/sso/exchange` | 本服务 | 程序化交换：请求体 `{"token":"…"}`，返回仪表盘会话令牌。 |
+| `GET /api/auth/app-token?app=freellmapi` | **网关** | 为已登录用户签发票据。 |
 
 网关接口同时把票据放进 `X-LLMGW-App-Token` 响应头，反向代理便可在
 `auth_request` 中直接取用，无需解析 JSON 正文。这让「打开应用即落在应用内」

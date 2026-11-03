@@ -37,6 +37,7 @@ import { urlTokenRouter } from './routes/url-tokens.js';
 import { updateRouter } from './routes/update.js';
 import { moderationRouter } from './routes/moderation.js';
 import { requireAuth } from './middleware/requireAuth.js';
+import { ssoAutoLogin } from './middleware/ssoAutoLogin.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 
@@ -358,6 +359,13 @@ export function createApp(config?: Config) {
   // Set serveStaticAssets: false in Config to skip static serving entirely
   // (e.g. in runtimes that serve assets through a different mechanism).
   if (cfg.serveStaticAssets) {
+    // Auto sign-in: a browser without a dashboard session but WITH a gateway
+    // session is sent to /sso, which exchanges the gateway's ticket for a
+    // local one. Mounted here — after every API and inference router, so
+    // those surfaces are never redirected, and before the static handler,
+    // which would otherwise answer the navigation with index.html and the
+    // login form.
+    app.use(ssoAutoLogin());
     const clientDist = cfg.clientDist
       ? path.resolve(cfg.clientDist)
       : path.resolve(__dirname, '../../client/dist');
