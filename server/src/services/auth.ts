@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword } from '../lib/password.js';
 // tokens. Distinct from the unified API key, which authenticates the /v1 proxy
 // for apps — this gates the /api/* admin surface for the human operator (#35).
 
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export interface SessionUser {
   userId: number;
@@ -42,6 +42,30 @@ export function createUser(email: string, password: string): SessionUser {
   }
   const result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
     .run(normalized, hashPassword(password));
+  return { userId: Number(result.lastInsertRowid), email: normalized };
+}
+
+/** Look up a user by email. Returns null when there is no such account. */
+export function findUserByEmail(email: string): SessionUser | null {
+  const row = getDb().prepare('SELECT id, email FROM users WHERE email = ?')
+    .get(normalizeEmail(email)) as { id: number; email: string } | undefined;
+  return row ? { userId: row.id, email: row.email } : null;
+}
+
+/**
+ * Create an account that is reachable through single sign-on only.
+ *
+ * The password is random and thrown away, so the local login form can never
+ * authenticate this account — it exists because the dashboard's user table
+ * requires one, and because an audit of "who used this dashboard" should be
+ * answerable from local rows even when the identity itself lives in the
+ * gateway.
+ */
+export function createSsoUser(email: string): SessionUser {
+  const normalized = normalizeEmail(email);
+  const unusable = crypto.randomBytes(32).toString('hex');
+  const result = getDb().prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
+    .run(normalized, hashPassword(unusable));
   return { userId: Number(result.lastInsertRowid), email: normalized };
 }
 

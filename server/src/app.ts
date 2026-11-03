@@ -27,6 +27,7 @@ import { backupsRouter } from './routes/backups.js';
 import { cacheRouter } from './routes/cache.js';
 import { compressionRouter } from './routes/compression.js';
 import { authRouter } from './routes/auth.js';
+import { ssoRouter } from './routes/sso.js';
 import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { statusRouter, providersRouter } from './routes/status.js';
@@ -36,6 +37,7 @@ import { urlTokenRouter } from './routes/url-tokens.js';
 import { updateRouter } from './routes/update.js';
 import { moderationRouter } from './routes/moderation.js';
 import { requireAuth } from './middleware/requireAuth.js';
+import { ssoAutoLogin } from './middleware/ssoAutoLogin.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 
@@ -240,6 +242,16 @@ export function createApp(config?: Config) {
   const adminRateLimiter = createAdminRateLimiter();
   app.use('/api', adminRateLimiter);
 
+  // Single sign-on from llm-gateway-go. Mounted OUTSIDE the dashboard session
+  // gate on purpose: the identity token in the request IS the credential, so
+  // demanding a session to obtain a session would be circular. Two shapes:
+  //   GET  /sso?token=…            browser landing (sets the session cookie)
+  //   POST /api/auth/sso/exchange  programmatic exchange (returns the token)
+  // Mounted BEFORE /api/auth so the exchange never depends on the auth
+  // router falling through for an unknown path.
+  app.use('/api/auth/sso', ssoRouter);
+  app.use('/sso', ssoRouter);
+
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
   // session; everything else under /api/* requires a logged-in dashboard user.
   // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
@@ -347,6 +359,13 @@ export function createApp(config?: Config) {
   // Set serveStaticAssets: false in Config to skip static serving entirely
   // (e.g. in runtimes that serve assets through a different mechanism).
   if (cfg.serveStaticAssets) {
+    // Auto sign-in: a browser without a dashboard session but WITH a gateway
+    // session is sent to /sso, which exchanges the gateway's ticket for a
+    // local one. Mounted here — after every API and inference router, so
+    // those surfaces are never redirected, and before the static handler,
+    // which would otherwise answer the navigation with index.html and the
+    // login form.
+    app.use(ssoAutoLogin());
     const clientDist = cfg.clientDist
       ? path.resolve(cfg.clientDist)
       : path.resolve(__dirname, '../../client/dist');

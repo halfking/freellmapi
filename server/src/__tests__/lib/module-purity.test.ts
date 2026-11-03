@@ -51,6 +51,11 @@ const PURE_MODULES = [
   // Type-only imports today; listed so they stay that way.
   'client-classifier.ts',
   'content.ts',
+  // Dashboard session cookie plumbing (#single sign-on). The auth gate and
+  // the SSO landing route both depend on it staying import-free: a value
+  // import here would drag the DB into the request path that decides who is
+  // logged in.
+  'session-cookie.ts',
   'think-tags.ts',
 ];
 

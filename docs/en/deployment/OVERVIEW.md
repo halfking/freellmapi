@@ -14,6 +14,7 @@ For installation paths beyond Docker (one-liner script, local development, deskt
 | --- | --- |
 | [01-docker.md](01-docker.md) | The image (multi-stage build on `node:24-bookworm-slim`), Compose quickstart, ports and LAN access, volumes and persistence, healthcheck, non-root runtime, native `better-sqlite3` compile rationale, and why a container cannot reach providers the host can (#733). |
 | [02-updates-and-backup.md](02-updates-and-backup.md) | Upgrade flow (`docker compose pull && docker compose up -d`), the dashboard update checker (#635/#703), backing up the SQLite data volume, and declarative config/catalog controls (#f4cd7b4). |
+| [03-sso-llm-gateway.md](03-sso-llm-gateway.md) | Single sign-on with llm-gateway-go: the shared identity contract, the ticket handshake, the reverse-proxy shape, and what it does not change. |
 
 ## Quick facts
 
